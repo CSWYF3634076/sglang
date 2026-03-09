@@ -19,6 +19,9 @@ from sglang.srt.entrypoints.openai.serving_base import OpenAIServingBase
 from sglang.srt.entrypoints.openai.usage_processor import UsageProcessor
 from sglang.srt.entrypoints.openai.utils import (
     process_hidden_states_from_ret,
+    process_prompt_token_ids_from_request,
+    process_output_token_ids_from_ret,
+    process_stream_output_token_ids,
     to_openai_style_logprobs,
 )
 from sglang.srt.managers.io_struct import GenerateReqInput
@@ -56,6 +59,23 @@ class OpenAIServingCompletion(OpenAIServingBase):
 
         return None
 
+    def _get_prompt_token_ids(
+        self, prompt: Union[List[int], List[List[int]], str, List[str]]
+    ) -> Union[List[int], List[List[int]]]:
+        if isinstance(prompt, str):
+            return self.tokenizer_manager.tokenizer.encode(prompt)
+
+        if isinstance(prompt, list):
+            if not prompt:
+                return []
+            if isinstance(prompt[0], str):
+                return [self.tokenizer_manager.tokenizer.encode(item) for item in prompt]
+            if isinstance(prompt[0], int):
+                return list(prompt)
+            return [list(item) for item in prompt]
+
+        raise TypeError(f"Unsupported prompt type for token ids: {type(prompt)!r}")
+
     def _convert_to_internal_request(
         self,
         request: CompletionRequest,
@@ -72,6 +92,9 @@ class OpenAIServingCompletion(OpenAIServingBase):
         prompt = request.prompt
         if self.template_manager.completion_template_name is not None:
             prompt = generate_completion_prompt_from_request(request)
+
+        if request.return_token_ids:
+            request.set_prompt_token_ids(self._get_prompt_token_ids(prompt))
 
         # Set logprob start length based on echo and logprobs
         if request.echo and request.logprobs:
@@ -197,6 +220,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
         # State tracking for streaming
         stream_buffers = {}
         n_prev_tokens = {}
+        output_token_ids_so_far = {}
 
         # Usage tracking
         prompt_tokens = {}
@@ -209,14 +233,24 @@ class OpenAIServingCompletion(OpenAIServingBase):
                 adapted_request, raw_request
             ):
                 index = content.get("index", 0)
+                stream_buffer = stream_buffers.get(index, "")
 
                 text = content["text"]
                 prompt_tokens[index] = content["meta_info"]["prompt_tokens"]
                 completion_tokens[index] = content["meta_info"]["completion_tokens"]
                 cached_tokens[index] = content["meta_info"].get("cached_tokens", 0)
                 hidden_states[index] = content["meta_info"].get("hidden_states", None)
-
-                stream_buffer = stream_buffers.get(index, "")
+                output_token_ids = process_stream_output_token_ids(
+                    content,
+                    request,
+                    output_token_ids_so_far,
+                    index,
+                )
+                prompt_token_ids = (
+                    process_prompt_token_ids_from_request(request, index // request.n)
+                    if not stream_buffer
+                    else None
+                )
                 # Handle echo for first chunk
                 if not stream_buffer:  # The first chunk
                     if request.echo:
@@ -266,6 +300,8 @@ class OpenAIServingCompletion(OpenAIServingBase):
                         if finish_reason and "matched" in finish_reason
                         else None
                     ),
+                    prompt_token_ids=prompt_token_ids,
+                    output_token_ids=output_token_ids,
                 )
                 chunk = CompletionStreamResponse(
                     id=content["meta_info"]["id"],
@@ -423,6 +459,10 @@ class OpenAIServingCompletion(OpenAIServingBase):
                     else None
                 ),
                 hidden_states=hidden_states,
+                prompt_token_ids=process_prompt_token_ids_from_request(
+                    request, idx // request.n
+                ),
+                output_token_ids=process_output_token_ids_from_ret(ret_item, request),
             )
             choices.append(choice_data)
 

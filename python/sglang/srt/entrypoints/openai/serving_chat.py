@@ -37,6 +37,9 @@ from sglang.srt.entrypoints.openai.serving_base import OpenAIServingBase
 from sglang.srt.entrypoints.openai.usage_processor import UsageProcessor
 from sglang.srt.entrypoints.openai.utils import (
     process_hidden_states_from_ret,
+    process_prompt_token_ids_from_request,
+    process_output_token_ids_from_ret,
+    process_stream_output_token_ids,
     to_openai_style_logprobs,
 )
 from sglang.srt.function_call.core_types import ToolCallItem
@@ -246,6 +249,20 @@ class OpenAIServingChat(OpenAIServingBase):
 
         # Process messages and apply chat template
         processed_messages = self._process_messages(request, is_multimodal)
+        if request.return_token_ids:
+            if isinstance(processed_messages.prompt_ids, str):
+                prompt_token_ids = self.tokenizer_manager.tokenizer.encode(
+                    processed_messages.prompt_ids
+                )
+            elif processed_messages.prompt_ids:
+                prompt_token_ids = list(processed_messages.prompt_ids)
+            elif processed_messages.prompt:
+                prompt_token_ids = self.tokenizer_manager.tokenizer.encode(
+                    processed_messages.prompt
+                )
+            else:
+                prompt_token_ids = []
+            request.set_prompt_token_ids(prompt_token_ids)
 
         # Build sampling parameters
         sampling_params = request.to_sampling_params(
@@ -603,6 +620,7 @@ class OpenAIServingChat(OpenAIServingBase):
         n_prev_tokens = {}
         has_tool_calls = {}
         finish_reasons = {}
+        output_token_ids_so_far = {}
 
         # Usage tracking
         prompt_tokens = {}
@@ -620,6 +638,12 @@ class OpenAIServingChat(OpenAIServingBase):
                 completion_tokens[index] = content["meta_info"]["completion_tokens"]
                 cached_tokens[index] = content["meta_info"].get("cached_tokens", 0)
                 hidden_states[index] = content["meta_info"].get("hidden_states", None)
+                output_token_ids = process_stream_output_token_ids(
+                    content,
+                    request,
+                    output_token_ids_so_far,
+                    index,
+                )
 
                 # Handle logprobs
                 choice_logprobs = None
@@ -647,6 +671,9 @@ class OpenAIServingChat(OpenAIServingBase):
                         delta=delta,
                         finish_reason=None,
                         logprobs=None,
+                        prompt_token_ids=process_prompt_token_ids_from_request(
+                            request, 0
+                        ),
                     )
                     chunk = ChatCompletionStreamResponse(
                         id=content["meta_info"]["id"],
@@ -659,6 +686,7 @@ class OpenAIServingChat(OpenAIServingBase):
                 stream_buffer = stream_buffers.get(index, "")
                 delta = content["text"][len(stream_buffer) :]
                 stream_buffers[index] = stream_buffer + delta
+                output_token_ids_sent = False
 
                 # Handle reasoning content
                 if self.reasoning_parser and request.separate_reasoning:
@@ -725,6 +753,7 @@ class OpenAIServingChat(OpenAIServingBase):
                             finish_reason=None,
                             matched_stop=None,
                             logprobs=choice_logprobs,
+                            output_token_ids=output_token_ids,
                         )
                         chunk = ChatCompletionStreamResponse(
                             id=content["meta_info"]["id"],
@@ -744,6 +773,23 @@ class OpenAIServingChat(OpenAIServingBase):
                             )
 
                         yield f"data: {chunk.model_dump_json()}\n\n"
+                        output_token_ids_sent = output_token_ids is not None
+
+                if output_token_ids is not None and not output_token_ids_sent:
+                    token_ids_chunk = ChatCompletionStreamResponse(
+                        id=content["meta_info"]["id"],
+                        created=int(time.time()),
+                        choices=[
+                            ChatCompletionResponseStreamChoice(
+                                index=index,
+                                delta=DeltaMessage(),
+                                finish_reason=None,
+                                output_token_ids=output_token_ids,
+                            )
+                        ],
+                        model=request.model,
+                    )
+                    yield f"data: {token_ids_chunk.model_dump_json()}\n\n"
 
             # Send finish_reason chunks for each index that completed
             for idx, finish_reason_data in finish_reasons.items():
@@ -926,6 +972,8 @@ class OpenAIServingChat(OpenAIServingBase):
                     else None
                 ),
                 hidden_states=hidden_states,
+                prompt_token_ids=process_prompt_token_ids_from_request(request, 0),
+                output_token_ids=process_output_token_ids_from_ret(ret_item, request),
             )
             choices.append(choice_data)
 

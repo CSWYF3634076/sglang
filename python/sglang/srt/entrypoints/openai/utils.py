@@ -70,3 +70,67 @@ def process_hidden_states_from_ret(
     if hidden_states is not None:
         hidden_states = hidden_states[-1] if len(hidden_states) > 1 else []
     return hidden_states
+
+def process_output_token_ids_from_ret(
+    ret_item: Dict[str, Any],
+    request: Union[
+        ChatCompletionRequest,
+        CompletionRequest,
+    ],
+) -> Optional[List[int]]:
+    """Process output token ids from a non-streaming response item."""
+    if not getattr(request, "return_token_ids", False):
+        return None
+
+    output_ids = ret_item.get("output_ids")
+    if output_ids is None:
+        return None
+    return list(output_ids)
+
+
+def process_prompt_token_ids_from_request(
+    request: Union[
+        ChatCompletionRequest,
+        CompletionRequest,
+    ],
+    prompt_index: int = 0,
+) -> Optional[List[int]]:
+    """Process prompt token ids from request-attached state."""
+    return request.get_prompt_token_ids(prompt_index)
+
+
+def process_stream_output_token_ids(
+    ret_item: Dict[str, Any],
+    request: Union[
+        ChatCompletionRequest,
+        CompletionRequest,
+    ],
+    output_token_ids_so_far: Dict[int, List[int]],
+    index: int,
+) -> Optional[List[int]]:
+    """Return newly observed output token ids for a streaming response item.
+
+    TokenizerManager can yield either cumulative output ids (default) or incremental
+    output ids when `stream_output` is enabled. Handle both forms.
+    """
+    if not getattr(request, "return_token_ids", False):
+        return None
+
+    current_output_ids = ret_item.get("output_ids")
+    if current_output_ids is None:
+        return None
+
+    current_output_ids = list(current_output_ids)
+    previous_output_ids = output_token_ids_so_far.get(index, [])
+
+    if (
+        len(current_output_ids) >= len(previous_output_ids)
+        and current_output_ids[: len(previous_output_ids)] == previous_output_ids
+    ):
+        new_output_ids = current_output_ids[len(previous_output_ids) :]
+        output_token_ids_so_far[index] = current_output_ids
+    else:
+        new_output_ids = current_output_ids
+        output_token_ids_so_far[index] = previous_output_ids + current_output_ids
+
+    return new_output_ids or None

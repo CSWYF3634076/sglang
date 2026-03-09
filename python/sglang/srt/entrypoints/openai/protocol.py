@@ -32,6 +32,7 @@ from openai.types.responses.tool import Tool
 from pydantic import (
     BaseModel,
     Field,
+    PrivateAttr,
     field_validator,
     model_serializer,
     model_validator,
@@ -48,6 +49,13 @@ from sglang.utils import convert_json_schema_to_str
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_NAME = "default"
+PromptTokenIds = Union[List[int], List[List[int]]]
+
+
+def _clone_prompt_token_ids(prompt_token_ids: PromptTokenIds) -> PromptTokenIds:
+    if prompt_token_ids and isinstance(prompt_token_ids[0], list):
+        return [list(token_ids) for token_ids in prompt_token_ids]
+    return list(prompt_token_ids)
 
 
 class ModelCard(BaseModel):
@@ -232,6 +240,13 @@ class CompletionRequest(BaseModel):
     top_p: float = 1.0
     user: Optional[str] = None
     return_hidden_states: bool = False
+    return_token_ids: bool = Field(
+        default=False,
+        description="If specified, the result will include token IDs alongside the "
+        "generated text. In streaming mode, prompt_token_ids is included only in "
+        "the first chunk, and output_token_ids contains the delta tokens for "
+        "each chunk.",
+    )
 
     # Extra parameters for SRT backend only and will be ignored by OpenAI models.
     top_k: int = -1
@@ -271,6 +286,7 @@ class CompletionRequest(BaseModel):
 
     # For custom metric labels
     custom_labels: Optional[Dict[str, str]] = None
+    _prompt_token_ids: Optional[PromptTokenIds] = PrivateAttr(default=None)
 
     @field_validator("max_tokens")
     @classmethod
@@ -278,6 +294,17 @@ class CompletionRequest(BaseModel):
         if v is not None and v <= 0:
             raise ValueError("max_tokens must be positive")
         return v
+
+    def set_prompt_token_ids(self, prompt_token_ids: PromptTokenIds) -> None:
+        self._prompt_token_ids = _clone_prompt_token_ids(prompt_token_ids)
+
+    def get_prompt_token_ids(self, prompt_index: int = 0) -> Optional[List[int]]:
+        if not self.return_token_ids or self._prompt_token_ids is None:
+            return None
+
+        if self._prompt_token_ids and isinstance(self._prompt_token_ids[0], list):
+            return list(self._prompt_token_ids[prompt_index])
+        return list(self._prompt_token_ids)
 
 
 class CompletionResponseChoice(BaseModel):
@@ -287,12 +314,18 @@ class CompletionResponseChoice(BaseModel):
     finish_reason: Optional[Literal["stop", "length", "content_filter", "abort"]] = None
     matched_stop: Union[None, int, str] = None
     hidden_states: Optional[object] = None
+    prompt_token_ids: Optional[List[int]] = None
+    output_token_ids: Optional[List[int]] = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
         data = handler(self)
         if self.hidden_states is None:
             data.pop("hidden_states", None)
+        if self.prompt_token_ids is None:
+            data.pop("prompt_token_ids", None)
+        if self.output_token_ids is None:
+            data.pop("output_token_ids", None)
         return data
 
 
@@ -313,12 +346,18 @@ class CompletionResponseStreamChoice(BaseModel):
     finish_reason: Optional[Literal["stop", "length", "content_filter", "abort"]] = None
     matched_stop: Union[None, int, str] = None
     hidden_states: Optional[object] = None
+    prompt_token_ids: Optional[List[int]] = None
+    output_token_ids: Optional[List[int]] = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
         data = handler(self)
         if self.hidden_states is None:
             data.pop("hidden_states", None)
+        if self.prompt_token_ids is None:
+            data.pop("prompt_token_ids", None)
+        if self.output_token_ids is None:
+            data.pop("output_token_ids", None)
         return data
 
 
@@ -502,6 +541,13 @@ class ChatCompletionRequest(BaseModel):
         default="auto", examples=["none"]
     )  # noqa
     return_hidden_states: bool = False
+    return_token_ids: bool = Field(
+        default=False,
+        description="If specified, the result will include token IDs alongside the "
+        "generated text. In streaming mode, prompt_token_ids is included only in "
+        "the first chunk, and output_token_ids contains the delta tokens for "
+        "each chunk.",
+    )
     reasoning_effort: Optional[Literal["low", "medium", "high"]] = Field(
         default="medium",
         description="Constrains effort on reasoning for reasoning models. "
@@ -553,6 +599,7 @@ class ChatCompletionRequest(BaseModel):
 
     # For data parallel rank routing
     data_parallel_rank: Optional[int] = None
+    _prompt_token_ids: Optional[PromptTokenIds] = PrivateAttr(default=None)
 
     # OpenAI/SGLang default sampling parameters
     _DEFAULT_SAMPLING_PARAMS = {
@@ -572,6 +619,17 @@ class ChatCompletionRequest(BaseModel):
             else:
                 values["tool_choice"] = "auto"
         return values
+
+    def set_prompt_token_ids(self, prompt_token_ids: PromptTokenIds) -> None:
+        self._prompt_token_ids = _clone_prompt_token_ids(prompt_token_ids)
+
+    def get_prompt_token_ids(self, prompt_index: int = 0) -> Optional[List[int]]:
+        if not self.return_token_ids or self._prompt_token_ids is None:
+            return None
+
+        if self._prompt_token_ids and isinstance(self._prompt_token_ids[0], list):
+            return list(self._prompt_token_ids[prompt_index])
+        return list(self._prompt_token_ids)
 
     @model_validator(mode="before")
     @classmethod
@@ -731,12 +789,18 @@ class ChatCompletionResponseChoice(BaseModel):
     ] = None
     matched_stop: Union[None, int, str] = None
     hidden_states: Optional[object] = None
+    prompt_token_ids: Optional[List[int]] = None
+    output_token_ids: Optional[List[int]] = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
         data = handler(self)
         if self.hidden_states is None:
             data.pop("hidden_states", None)
+        if self.prompt_token_ids is None:
+            data.pop("prompt_token_ids", None)
+        if self.output_token_ids is None:
+            data.pop("output_token_ids", None)
         return data
 
 
@@ -775,6 +839,17 @@ class ChatCompletionResponseStreamChoice(BaseModel):
         ]
     ] = None
     matched_stop: Union[None, int, str] = None
+    prompt_token_ids: Optional[List[int]] = None
+    output_token_ids: Optional[List[int]] = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if self.prompt_token_ids is None:
+            data.pop("prompt_token_ids", None)
+        if self.output_token_ids is None:
+            data.pop("output_token_ids", None)
+        return data
 
 
 class ChatCompletionStreamResponse(BaseModel):
