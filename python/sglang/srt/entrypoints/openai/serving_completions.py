@@ -20,8 +20,8 @@ from sglang.srt.entrypoints.openai.usage_processor import UsageProcessor
 from sglang.srt.entrypoints.openai.utils import (
     process_hidden_states_from_ret,
     process_prompt_token_ids_from_request,
-    process_output_token_ids_from_ret,
-    process_stream_output_token_ids,
+    process_completion_token_ids_from_ret,
+    process_stream_completion_token_ids,
     to_openai_style_logprobs,
 )
 from sglang.srt.managers.io_struct import GenerateReqInput
@@ -220,7 +220,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
         # State tracking for streaming
         stream_buffers = {}
         n_prev_tokens = {}
-        output_token_ids_so_far = {}
+        completion_token_ids_so_far = {}
 
         # Usage tracking
         prompt_tokens = {}
@@ -240,10 +240,10 @@ class OpenAIServingCompletion(OpenAIServingBase):
                 completion_tokens[index] = content["meta_info"]["completion_tokens"]
                 cached_tokens[index] = content["meta_info"].get("cached_tokens", 0)
                 hidden_states[index] = content["meta_info"].get("hidden_states", None)
-                output_token_ids = process_stream_output_token_ids(
+                completion_token_ids = process_stream_completion_token_ids(
                     content,
                     request,
-                    output_token_ids_so_far,
+                    completion_token_ids_so_far,
                     index,
                 )
                 prompt_token_ids = (
@@ -301,7 +301,7 @@ class OpenAIServingCompletion(OpenAIServingBase):
                         else None
                     ),
                     prompt_token_ids=prompt_token_ids,
-                    output_token_ids=output_token_ids,
+                    completion_token_ids=completion_token_ids,
                 )
                 chunk = CompletionStreamResponse(
                     id=content["meta_info"]["id"],
@@ -462,7 +462,9 @@ class OpenAIServingCompletion(OpenAIServingBase):
                 prompt_token_ids=process_prompt_token_ids_from_request(
                     request, idx // request.n
                 ),
-                output_token_ids=process_output_token_ids_from_ret(ret_item, request),
+                completion_token_ids=process_completion_token_ids_from_ret(
+                    ret_item, request
+                ),
             )
             choices.append(choice_data)
 

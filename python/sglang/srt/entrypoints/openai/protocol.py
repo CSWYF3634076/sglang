@@ -244,7 +244,7 @@ class CompletionRequest(BaseModel):
         default=False,
         description="If specified, the result will include token IDs alongside the "
         "generated text. In streaming mode, prompt_token_ids is included only in "
-        "the first chunk, and output_token_ids contains the delta tokens for "
+        "the first chunk, and completion_token_ids contains the delta tokens for "
         "each chunk.",
     )
 
@@ -315,7 +315,7 @@ class CompletionResponseChoice(BaseModel):
     matched_stop: Union[None, int, str] = None
     hidden_states: Optional[object] = None
     prompt_token_ids: Optional[List[int]] = None
-    output_token_ids: Optional[List[int]] = None
+    completion_token_ids: Optional[List[int]] = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
@@ -324,8 +324,8 @@ class CompletionResponseChoice(BaseModel):
             data.pop("hidden_states", None)
         if self.prompt_token_ids is None:
             data.pop("prompt_token_ids", None)
-        if self.output_token_ids is None:
-            data.pop("output_token_ids", None)
+        if self.completion_token_ids is None:
+            data.pop("completion_token_ids", None)
         return data
 
 
@@ -347,7 +347,7 @@ class CompletionResponseStreamChoice(BaseModel):
     matched_stop: Union[None, int, str] = None
     hidden_states: Optional[object] = None
     prompt_token_ids: Optional[List[int]] = None
-    output_token_ids: Optional[List[int]] = None
+    completion_token_ids: Optional[List[int]] = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
@@ -356,8 +356,8 @@ class CompletionResponseStreamChoice(BaseModel):
             data.pop("hidden_states", None)
         if self.prompt_token_ids is None:
             data.pop("prompt_token_ids", None)
-        if self.output_token_ids is None:
-            data.pop("output_token_ids", None)
+        if self.completion_token_ids is None:
+            data.pop("completion_token_ids", None)
         return data
 
 
@@ -545,7 +545,7 @@ class ChatCompletionRequest(BaseModel):
         default=False,
         description="If specified, the result will include token IDs alongside the "
         "generated text. In streaming mode, prompt_token_ids is included only in "
-        "the first chunk, and output_token_ids contains the delta tokens for "
+        "the first chunk, and completion_token_ids contains the delta tokens for "
         "each chunk.",
     )
     reasoning_effort: Optional[Literal["low", "medium", "high"]] = Field(
@@ -790,7 +790,7 @@ class ChatCompletionResponseChoice(BaseModel):
     matched_stop: Union[None, int, str] = None
     hidden_states: Optional[object] = None
     prompt_token_ids: Optional[List[int]] = None
-    output_token_ids: Optional[List[int]] = None
+    completion_token_ids: Optional[List[int]] = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
@@ -799,8 +799,8 @@ class ChatCompletionResponseChoice(BaseModel):
             data.pop("hidden_states", None)
         if self.prompt_token_ids is None:
             data.pop("prompt_token_ids", None)
-        if self.output_token_ids is None:
-            data.pop("output_token_ids", None)
+        if self.completion_token_ids is None:
+            data.pop("completion_token_ids", None)
         return data
 
 
@@ -840,15 +840,15 @@ class ChatCompletionResponseStreamChoice(BaseModel):
     ] = None
     matched_stop: Union[None, int, str] = None
     prompt_token_ids: Optional[List[int]] = None
-    output_token_ids: Optional[List[int]] = None
+    completion_token_ids: Optional[List[int]] = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
         data = handler(self)
         if self.prompt_token_ids is None:
             data.pop("prompt_token_ids", None)
-        if self.output_token_ids is None:
-            data.pop("output_token_ids", None)
+        if self.completion_token_ids is None:
+            data.pop("completion_token_ids", None)
         return data
 
 
